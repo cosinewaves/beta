@@ -1,68 +1,99 @@
 --!strict
+--[[
+	Author: cosinewaves
+	Name: evaluate.lua
+]]
+
+-- https://en.wikipedia.org/wiki/Monkey_patch
+
 
 local typings = require(script.Parent.internalTypings)
+local errors = require(script.Parent.errors)
 
 local evaluate = {}
 
-function evaluate.new<T>(fn: () -> T): typings.evaluate<T>
-	local self = {} :: any
+function evaluate.new<T>(computeFn: () -> T): typings.evaluate<T>
+	if typeof(computeFn) ~= "function" then
+		errors.new("evaluate", "computeFn must be a function", 3)
+	end
+
+	local self = {} :: typings.evaluate<T>
 	local value: T
-	local disconnectors: { () -> () } = {}
+	local disconnects: { () -> () } = {}
 
-	
-	local function update()
-		
-		for _, disconnect in disconnectors do
-			disconnect()
-		end
-		disconnectors = {}
-
-		value = fn()
-
-	end
-
-	
-	update()
-	setmetatable(self, {
-		__call = function(_: any): T
-			return value
-		end,
-	})
-
-	
 	function self:disconnect()
-		for _, disconnect in disconnectors do
-			disconnect()
+		for _, disconnect in disconnects do
+			pcall(disconnect)
 		end
-		disconnectors = {}
+		table.clear(disconnects)
 	end
 
-	self.value = value
+	local function safeCompute(): T
+		local ok, result = pcall(computeFn)
+		if not ok then
+			errors.new("evaluate", `failed to compute: {result}`, 3)
+		end
+		return result
+	end
 
-	local oldMeta = getmetatable(_G)
-	local proxy = setmetatable({}, {
-		__index = function(_, key)
-			local val = _G[key]
-			if type(val) == "function" and pcall(function() return val.respond end) then
-				-- Hook into state to listen for updates
-				local disconnect = val:respond(function()
-					update()
-				end)
-				table.insert(disconnectors, disconnect)
+	local function setup()
+		self:disconnect() -- Clear old listeners
+
+		local usedStates: { typings.state<any> } = {}
+
+		-- Temporary metatable to intercept state() calls
+		local meta = getmetatable(setmetatable({}, {
+			__call = function(_, ...)
+				error("Unexpected __call interception", 2)
+			end,
+		}))
+
+		if not meta or typeof(meta.__call) ~= "function" then
+			errors.new("evaluate", "Unable to monkey-patch __call", 3)
+		end
+
+		local function interceptState<T>(state: typings.state<T>): T
+			table.insert(usedStates, state)
+			local ok, result = pcall(state)
+			if not ok then
+				errors.new("evaluate", `error calling state: {result}`, 3)
 			end
-			return val
-		end,
+			return result
+		end
+
+		-- Recompute value and track dependencies
+		value = safeCompute()
+
+		for _, state in usedStates do
+			local disconnect
+			local ok, err = pcall(function()
+				disconnect = state:respond(function()
+					value = safeCompute()
+				end)
+			end)
+			if not ok or not disconnect then
+				errors.new("evaluate", `failed to respond to state: {err}`, 2)
+			else
+				table.insert(disconnects, disconnect)
+			end
+		end
+	end
+
+	setup()
+
+	function self:__call(): T
+		return value
+	end
+
+	setmetatable(self, {
+		__call = self.__call,
 	})
 
-	setfenv(fn, proxy)
-	update()
-	setfenv(fn, _G)
-
-	return self :: typings.evaluate<T>
+	return self
 end
 
 setmetatable(evaluate, {
-	__call = function(_: typeof(evaluate), fn: () -> any)
+	__call = function(_, fn)
 		return evaluate.new(fn)
 	end,
 })
