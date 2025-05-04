@@ -4,9 +4,6 @@
 	Name: evaluate.lua
 ]]
 
--- https://en.wikipedia.org/wiki/Monkey_patch
-
-
 local typings = require(script.Parent.internalTypings)
 local errors = require(script.Parent.errors)
 
@@ -21,6 +18,7 @@ function evaluate.new<T>(computeFn: () -> T): typings.evaluate<T>
 	local value: T
 	local disconnects: { () -> () } = {}
 
+	-- disconnects all listeners to avoid memory leaks and stale listeners
 	function self:disconnect()
 		for _, disconnect in disconnects do
 			pcall(disconnect)
@@ -37,11 +35,12 @@ function evaluate.new<T>(computeFn: () -> T): typings.evaluate<T>
 	end
 
 	local function setup()
-		self:disconnect() -- Clear old listeners
+		self:disconnect()
 
 		local usedStates: { typings.state<any> } = {}
 
-		-- Temporary metatable to intercept state() calls
+		-- Monkey-patching concept to intercept `state()` calls while evaluating
+		-- https://en.wikipedia.org/wiki/Monkey_patch
 		local meta = getmetatable(setmetatable({}, {
 			__call = function(_, ...)
 				error("Unexpected __call interception", 2)
@@ -52,6 +51,7 @@ function evaluate.new<T>(computeFn: () -> T): typings.evaluate<T>
 			errors.new("evaluate", "Unable to monkey-patch __call", 3)
 		end
 
+		-- used to track dependencies during computeFn execution
 		local function interceptState<T>(state: typings.state<T>): T
 			table.insert(usedStates, state)
 			local ok, result = pcall(state)
@@ -61,12 +61,15 @@ function evaluate.new<T>(computeFn: () -> T): typings.evaluate<T>
 			return result
 		end
 
-		-- Recompute value and track dependencies
+		-- initial compute and track which states were accessed
 		value = safeCompute()
 
+		-- re-subscribe to all used states so we can reactively update
 		for _, state in usedStates do
 			local disconnect
 			local ok, err = pcall(function()
+				-- Observer pattern: subscribe to state changes
+				-- https://en.wikipedia.org/wiki/Observer_pattern
 				disconnect = state:respond(function()
 					value = safeCompute()
 				end)
@@ -82,6 +85,7 @@ function evaluate.new<T>(computeFn: () -> T): typings.evaluate<T>
 	setup()
 
 	function self:__call(): T
+		-- Acts like a getter
 		return value
 	end
 
@@ -92,6 +96,8 @@ function evaluate.new<T>(computeFn: () -> T): typings.evaluate<T>
 	return self
 end
 
+-- Syntactic sugar: allows calling evaluate(fn) directly
+-- https://en.wikipedia.org/wiki/Syntactic_sugar
 setmetatable(evaluate, {
 	__call = function(_, fn)
 		return evaluate.new(fn)
