@@ -18,7 +18,7 @@
 
 ```lua
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local beta = require(ReplicatedStorage:WaitForChild("beta"))
+local beta = require(ReplicatedStorage.beta)
 
 local state = beta.state
 local evaluate = beta.evaluate
@@ -30,7 +30,9 @@ local evaluate = beta.evaluate
 
 ### `state(initialValue) -> state<T>`
 
-Create a reactive state value.
+Create a reactive state value. Call the state with no arguments to read the state, and call it with an argument to modify the state.
+
+> Calling the state with a second parameter of a boolean will determine whether to force any evaluations to respond. Please see below for more information.
 
 ```lua
 local health = state(100)
@@ -51,7 +53,9 @@ health(90)
 
 ### `evaluate(fn) -> evaluate<T>`
 
-Create a derived value from other states.
+Create a derived value from other states. 
+
+> evaluate uses a distinctUntilChanged behaviour to calculate evaluations - only re-evaluating when the new value is different to the old value. This helps peformance and reduced memory usage. You can read about it [here](https://www.learnrxjs.io/learn-rxjs/operators/filtering/distinctuntilchanged).
 
 ```lua
 local health = state(80)
@@ -60,19 +64,10 @@ local status = evaluate(function()
 end)
 
 print(status()) --> "Healthy"
+status:disconnect() -- Disconnectable evaluations
 ```
 
 Auto-updates when `health` changes.
 
 ---
 
-## 🧠 Inspirations
-
-* [Fusion](https://elttob.uk/Fusion/)
-* Roblox reactive UI patterns
-
----
-
-## 📄 License
-
-MIT © cosinewaves
