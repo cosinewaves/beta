@@ -30,3 +30,6 @@ local myPart = hook("Part", {
 })
 
 ```
+
+## decay
+replace all disconnect with a decay module like beta.decay(beta.evaluate()) or beta.decay(beta.state.respond(beta.state)) for example which is a disconnect function - based off beta decay radiation.
